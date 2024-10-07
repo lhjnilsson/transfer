@@ -48,9 +48,11 @@ func (s *Store) PrepareTemporaryTable(tableData *optimization.TableData, tableCo
 
 	// Load fp into s3, get S3 URI and pass it down.
 	s3Uri, err := s3lib.UploadLocalFileToS3(context.Background(), s3lib.UploadArgs{
-		OptionalS3Prefix: s.optionalS3Prefix,
-		Bucket:           s.bucket,
-		FilePath:         fp,
+		OptionalS3Prefix:           s.optionalS3Prefix,
+		Bucket:                     s.bucket,
+		FilePath:                   fp,
+		OverrideAWSAccessKeyID:     &s.config.Redshift.AccessKeyID,
+		OverrideAWSAccessKeySecret: &s.config.Redshift.AccessKeySecret,
 	})
 
 	if err != nil {
@@ -61,11 +63,12 @@ func (s *Store) PrepareTemporaryTable(tableData *optimization.TableData, tableCo
 	// Note, we need to specify `\\N` here and in `CastColVal(..)` we are only doing `\N`, this is because Redshift treats backslashes as an escape character.
 	// So, it'll convert `\N` => `\\N` during COPY.
 	copyStmt := fmt.Sprintf(
-		`COPY %s (%s) FROM '%s' DELIMITER '\t' NULL AS '\\N' GZIP FORMAT CSV %s dateformat 'auto' timeformat 'auto';`,
+		`COPY %s (%s) FROM '%s' CREDENTIALS '%s' REGION '%s' DELIMITER '\t' NULL AS '\\N' GZIP FORMAT CSV dateformat 'auto' timeformat 'auto';`,
 		tempTableID.FullyQualifiedName(),
 		strings.Join(sql.QuoteColumns(tableData.ReadOnlyInMemoryCols().ValidColumns(), s.Dialect()), ","),
 		s3Uri,
-		s.credentialsClause,
+		fmt.Sprintf("aws_access_key_id=%s;aws_secret_access_key=%s", s.config.Redshift.AccessKeyID, s.config.Redshift.AccessKeySecret),
+		s.config.Redshift.BucketRegion,
 	)
 
 	if _, err = s.Exec(copyStmt); err != nil {
